@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {createApp} from '../server.mjs';
-const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');
 const helpers=source.slice(source.indexOf('let bootstrapRequest='),source.indexOf('async function post('));
 const response=(status,data)=>({status,ok:status>=200&&status<300,json:async()=>data});
 function browser(fetcher,csrf='old'){

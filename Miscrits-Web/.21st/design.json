@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "project": {
+    "name": "miscrits-browser-client",
+    "productType": "Local Miscrits automation dashboard",
+    "stack": [
+      "React 19",
+      "Vite 8",
+      "React Icons",
+      "CSS",
+      "Node.js"
+    ]
+  },
+  "sources": {
+    "tokens": [
+      "src/styles.css",
+      "src/team.css"
+    ],
+    "components": [
+      "src/App.jsx",
+      "src/Workspace.jsx",
+      "src/panels/"
+    ],
+    "assets": [],
+    "instructions": []
+  },
+  "design": {
+    "colorMode": "dark-default, user-selectable light",
+    "colors": {
+      "dark": {
+        "background": "#101419",
+        "surface": "#181e25",
+        "accent": "#55d6be"
+      },
+      "light": {
+        "background": "#f3f6f8",
+        "surface": "#ffffff",
+        "accent": "#087f6e"
+      }
+    },
+    "typography": {},
+    "spacing": {},
+    "radius": {},
+    "shadows": {},
+    "motion": {},
+    "density": "compact"
+  },
+  "components": {
+    "installed": [],
+    "preferredPrimitives": [
+      "Existing button, avatar, card and hint classes",
+      "Native details and summary"
+    ],
+    "patterns": []
+  },
+  "constraints": {
+    "must": [
+      "Use shared semantic slate, teal and amber tokens in both themes",
+      "Show account-specific map availability from the route planner",
+      "Keep selection usable with keyboard and on mobile"
+    ],
+    "avoid": []
+  },
+  "decisions": [
+    "Hunt uses portrait-and-name grids with rarity filters, 24-item pagination and bounded scrolling.",
+    "Unavailable targets show a reason and cannot be added.",
+    "Route controls and advanced capture rules are folded by default.",
+    "Capture rules use compact colored grade badges matching native F- through S+ totals, a mode-aware summary, and explicit minimum-grade override wording.",
+    "React component shell and panels, React Icons navigation, plain task headings and compact surfaces.",
+    "Dark mode is the default regardless of OS preference; the optional light-mode choice persists locally.",
+    "Preserve existing automation controller and local Node API during frontend migration.",
+    "Your team uses a compact active-team header with immediate-save auto level-up, per-copy platinum bonus switches, distinct green HP/blue XP bars and a paginated owned inventory.",
+    "Inventory supports native drag/drop and keyboard/tap slot selection. No automatic selection, tier-training or replacement controls are shown."
+  ],
+  "evidence": [
+    "Context7 React integration documentation consulted; 21st catalog search unavailable; CLI review completed."
+  ],
+  "generatedAt": "2026-10-22T19:30:36.474Z"
+}

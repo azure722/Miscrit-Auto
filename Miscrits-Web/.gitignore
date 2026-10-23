@@ -4,3 +4,7 @@
 /data/*.tmp
 /runtime/node.exe
 *.log
+node_modules/
+test-results/
+playwright-report/
+ui-*.png

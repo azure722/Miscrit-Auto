@@ -26,7 +26,7 @@ export function unwrap(response, rpcId = '') {
   if (value.success !== true) {
     const flags=Object.fromEntries(['cooldown','disabled','limit','drop'].map(key=>[key,Boolean(data?.[key])]));
     const reason=safeReason(data?.message || data?.msg || data?.reason || data?.error?.message || data?.error || value.message || value.error?.message || value.error);
-    const known=flags.disabled?'Search object is disabled.':flags.limit?'Search object daily limit reached.':flags.cooldown?'Search object is cooling down.':flags.drop?'Search returned an item drop instead of an encounter.':'';
+    const known=flags.disabled?'Search object is disabled.':flags.limit?'The game server reported a daily search limit.':flags.cooldown?'Search object is cooling down.':flags.drop?'Search returned an item drop instead of an encounter.':'';
     const error=new GameError(`${known || 'The game server rejected the request.'}${rpcId?' ['+rpcId+']':''}${reason?' '+reason:!known?' No reason was supplied.':''}`);
     error.rejected=true;error.rpcId=rpcId;error.searchOutcome=flags;
     throw error;

@@ -1,5 +1,7 @@
 # Browser auto level-up
 
+This document records earlier training behavior. The current website replaces tier training and automatic replacements with an owned inventory and manual team swaps. See [Team management](WEB-TEAM-MANAGEMENT.md) for the active-team toggle, per-copy platinum bonuses and current UI.
+
 In Your team, enable Auto level-up > Level up with earned XP, save training settings, and start automation. This setting defaults off and applies to both hunting and campaign. Team cards show XP and whether each teammate is ready. Only the active team is trained, up to level 35.
 
 The level 1–34 XP thresholds were extracted from the current native game's `Utils.get_exp_needed`, which reads `Constants.xps`. Both normal (`exp`, `level`) and compact v2 (`x`, `l`) owned records are supported. Missing or malformed XP cannot authorize training.

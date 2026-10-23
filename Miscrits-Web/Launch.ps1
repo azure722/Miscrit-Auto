@@ -18,4 +18,5 @@ if (-not $running) {
     }
 }
 if (-not $running) { throw 'The browser backend could not start. Run runtime/node.exe server.mjs in Miscrits-Web for the error.' }
+if ($health.version -lt 17) { throw 'An older website backend is still running. Finish any battle, run Stop Miscrits Website.cmd, then run Launch Miscrits Website.cmd again and sign in.' }
 Start-Process $url

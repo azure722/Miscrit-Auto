@@ -19,6 +19,7 @@ export function stopAdvice(message,{uncertain=false,rpcId='',battle=false}={}){
   if(/virtue/i.test(message))return {category:'Insufficient virtue',action:'Check the virtue balance and heal your team in the game when available. Resume only after the team is ready.'};
   if(/session expired|sign in|signed out|login/i.test(message))return {category:'Account session',action:'Sign in again using Connect account. Check any restored battle before Start.'};
   if(/disconnect|connection|reconnect|socket/i.test(message))return {category:'Connection',action:'Check internet access. Wait for reconnection, then inspect the restored battle and press Start when ready.'};
+  if(rpcId==='create_battle'&&/daily.*limit/i.test(message))return {category:'Server search limit',action:'Automation is paused. The server did not specify whether this limit applies to the object, species or account. Other targets may also be limited. Wait until the game permits searching; changing targets or slowing searches cannot remove an existing quota.'};
   if(/daily|attempts.*used|victory limit|all campaign stages|all hunt targets/i.test(message))return {category:'Run complete or limit reached',action:'Review your queue or campaign progress. Choose new targets or adjust your limit; daily attempt limits must wait for the game reset.'};
   if(/^automation paused/i.test(message))return {category:'Paused by user',action:battle?'Manual battle controls remain available. Press Start to resume when ready.':'Press Start when ready to continue with the saved settings.'};
   if(/saving target removal failed/i.test(message))return {category:'Settings could not be saved',action:'The capture was kept. Check available disk space, remove the captured target from Hunt and save settings before restarting.'};
@@ -44,7 +45,7 @@ export function targetQueue({config,player,catalog,metadata,index,cooldowns,curs
     const members=player.miscrits.map(m=>owned(m,metadata)).filter(m=>m.mId===family?.id).sort((a,b)=>b.rating-a.rating||b.level-a.level);
     let status='ready',reason=plan?.needsCapture.includes(name)?'Seeking a rating-17+ copy.':'Search target selected.';
     if(plan?.complete.includes(name)&&!config.names.includes(name)){status='complete';reason='Family completed at level 30; duplicate training skipped.';}
-    else if(!stops.length){status='unavailable';reason='No available mapped object today; check schedule, map unlocks and tickets.';}
+    else if(!stops.length){status='unavailable';reason=route.availability[name]?.detail||route.availability[name]?.reason||'No available mapped object today; check schedule, map unlocks and tickets.';}
     else if(remaining>0){status='cooldown';reason='Waiting for a search object cooldown.';}
     if(plan?.traineeIds.some(id=>members.some(m=>m.id===id)))reason+=' Selected copy is training to level 30.';
     return {name,rarity:family?.rarity,primary:config.primaryTarget===name,status,reason,waitSeconds:Math.ceil(remaining/1000),bestRating:members[0]?.rating??null};

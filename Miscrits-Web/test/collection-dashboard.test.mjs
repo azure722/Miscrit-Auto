@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');
 const helpers=source.slice(source.indexOf('function buildCollectionRows('),source.indexOf('function renderCollection('));
 const context=vm.createContext({});vm.runInContext(helpers,context);
 const build=context.buildCollectionRows,filter=context.filterCollectionRows,summarize=context.summarizeCollection;

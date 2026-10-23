@@ -102,7 +102,7 @@ test('arena damage observations sum multi-hit actions and are invalidated by sta
 test('account totals UI separates server wins from run counters and shows unknown Platinum lifetime totals',()=>{
   class Element{constructor(tag='',css='',text=''){Object.assign(this,{tag,className:css,textContent:text,children:[],value:'Platinum'});}append(...c){this.children.push(...c);}replaceChildren(){this.children=[];}}
   const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8'),code=source.slice(source.indexOf('function renderArenaTotals('),source.indexOf('function renderArena(){'));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8'),code=source.slice(source.indexOf('function renderArenaTotals('),source.indexOf('function renderArena(){'));
   const state={connected:true,config:{arenaType:'Platinum'},arena:{records:{Platinum:arenaTotals('Platinum',{info:{pa_streak:5,pa_max_streak:10}})},run:{wins:2}}};
   const context=vm.createContext({state,$,element:(...a)=>new Element(...a),arenaStatsLoading:false,tab:'team'});vm.runInContext(code,context);context.renderArenaTotals();
   assert.equal($('arena-account-totals').children[0].children[1].textContent,'—');assert.equal($('arena-account-totals').children[2].children[1].textContent,'5');assert.match($('arena-record-source').textContent,/not supplied/);

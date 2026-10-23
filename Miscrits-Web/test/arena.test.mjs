@@ -123,7 +123,7 @@ test('transport uses native matchmaker envelopes and routes only matched and cod
 test('manual draft frontend retains selection across polls and excludes banned species',()=>{
   class Element{constructor(tag='',css='',text=''){Object.assign(this,{tag,className:css,textContent:text,children:[],handlers:{}});}append(...children){this.children.push(...children);}replaceChildren(){this.children=[];}addEventListener(event,callback){this.handlers[event]=callback;}}
   const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8'),helper=source.slice(source.indexOf('let draftSelection='),source.indexOf("$('arena-open-battle').addEventListener"));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8'),helper=source.slice(source.indexOf('let draftSelection='),source.indexOf("$('arena-open-battle').addEventListener"));
   const state={connected:true,running:false,busy:false,config:{activity:'arena'},arena:{run:{battles:2,wins:1,losses:1}},draft:{id:'d',stage:'pick',pool:[1,2,3,4,5,6],banned:[1],awaiting:false,deadline:Date.now()+40000}};
   const context=vm.createContext({$,element:(...args)=>new Element(...args),state,catalog:catalog.species,toast(){}});vm.runInContext(helper,context);context.renderArena();
   assert.equal($('draft-pool').children[0].children[0].disabled,true);

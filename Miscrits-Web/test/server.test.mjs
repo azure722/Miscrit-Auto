@@ -8,7 +8,7 @@ test('local server serves UI, validates browser session and rejects foreign orig
   try{
     const root=await fetch(base);assert.equal(root.status,200);assert.match(await root.text(),/Field Station/);assert.match(root.headers.get('content-security-policy'),/frame-ancestors 'none'/);
     const health=await fetch(base+'/api/health');assert.equal(health.status,200);
-    assert.deepEqual(await health.json(),{app:'miscrits-browser',version:14,needsGame:false,connected:false,reconnecting:false,running:false,busy:false,activeBattle:false});
+    assert.deepEqual(await health.json(),{app:'miscrits-browser',version:17,needsGame:false,connected:false,reconnecting:false,running:false,busy:false,activeBattle:false});
     assert.equal((await fetch(base+'/api/state')).status,403);
     assert.equal((await fetch(base+'/api/bootstrap',{headers:{Origin:'https://evil.example'}})).status,403);
     const boot=await fetch(base+'/api/bootstrap');const cookie=boot.headers.get('set-cookie').split(';')[0];const {csrf,catalog}=await boot.json();assert.ok(catalog.length>400);

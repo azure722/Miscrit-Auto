@@ -26,7 +26,7 @@ export async function createApp({port=4318,fetchData=true,engine:provided}={}) {
       captureThreshold:old.capture_threshold||70,fleeUnwanted:old.flee_unwanted??true,autoReplace:old.auto_replace_max_level??false,replacementNames:canonical(old.replacement_names)};
     if (!['fight','capture_any','capture_targeted','capture_rated','manual_target'].includes(config.mode)) config.mode=DEFAULTS.mode;
   }
-  const engine=provided||new Engine({catalog,protocol,config,save:next=>atomic(configPath,next),history:readJSON(historyPath,[]),saveHistory:items=>atomic(historyPath,items),profiles:readJSON(profilesPath,[]),saveProfiles:items=>atomic(profilesPath,items)});
+  const engine=provided||new Engine({catalog,protocol,config,manualTeamManagement:true,save:next=>atomic(configPath,next),history:readJSON(historyPath,[]),saveHistory:items=>atomic(historyPath,items),profiles:readJSON(profilesPath,[]),saveProfiles:items=>atomic(profilesPath,items)});
   let dataStatus='Loading official abilities…';
   const loadData=async()=>{
     try {
@@ -52,7 +52,7 @@ export async function createApp({port=4318,fetchData=true,engine:provided}={}) {
     res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' https://cdn.worldofmiscrits.com; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (req.headers.host!==expected || (req.headers.origin && req.headers.origin!==`http://${expected}`)) {json(res,403,{error:'Local access only.'});return;}
     const url=new URL(req.url,`http://${expected}`);
-    if (url.pathname==='/api/health' && req.method==='GET') {json(res,200,{app:'miscrits-browser',version:14,needsGame:false,connected:Boolean(engine.player&&engine.transport?.connected),reconnecting:Boolean(engine.reconnecting),running:Boolean(engine.running),busy:Boolean(engine.busy),activeBattle:Boolean(engine.battle)});return;}
+    if (url.pathname==='/api/health' && req.method==='GET') {json(res,200,{app:'miscrits-browser',version:17,needsGame:false,connected:Boolean(engine.player&&engine.transport?.connected),reconnecting:Boolean(engine.reconnecting),running:Boolean(engine.running),busy:Boolean(engine.busy),activeBattle:Boolean(engine.battle)});return;}
     if (url.pathname==='/api/bootstrap' && req.method==='GET') {
       const cookie=req.headers.cookie?.split('; ').find(c=>c.startsWith('mc_owner='))?.slice(9);
       if (ownerCookie && !safeEqual(cookie,ownerCookie)) {json(res,403,{code:'BROWSER_OWNER_CONFLICT',error:'This website is connected to another browser or browser profile. Use the original window. To switch browsers, finish any battle, then run Stop Miscrits Website.cmd and Launch Miscrits Website.cmd.'});return;}
@@ -77,6 +77,8 @@ export async function createApp({port=4318,fetchData=true,engine:provided}={}) {
           case '/api/logout': await engine.logout(); break;
           case '/api/reconnect': await engine.reconnect(); break;
           case '/api/settings': engine.updateConfig(input); break;
+          case '/api/team/settings': engine.updateTeamSettings(input); break;
+          case '/api/team/swap': await engine.swapTeam(input); break;
           case '/api/start': engine.start(); break;
           case '/api/pause': engine.stop();await engine.arenaCancelPromise; break;
           case '/api/arena/draft':if(engine.busy)throw new Error('Wait for the pending request.');await engine.draftAction(input.kind,input.ids);break;

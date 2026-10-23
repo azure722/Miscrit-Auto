@@ -1,13 +1,16 @@
 import {Transport, GameError} from './transport.mjs';
+import {huntAvailability} from './model.mjs';
 import {DEFAULTS, TRAINING_MIN_RATING, settings, owned, trainingStatus, collectionFamilies, miscritsIndex, selectedTrainingPlan, rotationPlan, routePlan, abilities, decision,targetMatches,atSearchLocation} from './model.mjs';
 import {SessionStats,huntNames,targetQueue,nextSearchStop,stopAdvice} from './workflow.mjs';
 import {ARENAS,isArena,arenaEligibility,draftChoices,arenaTotals} from './arena.mjs';
 import {arenaDecision} from './arena-strategy.mjs';
+import {teamVitals,teamSwap} from './team.mjs';
 
 export class Engine {
-  constructor({catalog,protocol,config={},save=()=>{},history=[],saveHistory=()=>{},profiles=[],saveProfiles=()=>{},transportFactory}) {
+  constructor({catalog,protocol,config={},save=()=>{},history=[],saveHistory=()=>{},profiles=[],saveProfiles=()=>{},transportFactory,manualTeamManagement=false}) {
     Object.assign(this,{catalog,protocol,save,saveHistory});
-    this.config=settings({...DEFAULTS,...config},catalog); this.metadata=new Map(catalog.species.map(s=>[s.id,s]));
+    this.manualTeamManagement=manualTeamManagement;
+    this.config=settings(this.teamConfig({...DEFAULTS,...config}),catalog); this.metadata=new Map(catalog.species.map(s=>[s.id,s]));
     this.events=[]; this.history=history; this.status='Sign in to your Miscrits account.';
     this.player=null; this.battle=null; this.running=false; this.busy=false; this.uncertain=false;
     this.reconnecting=false;this.requiresLogin=false;this.connectionEpoch=0;
@@ -73,6 +76,9 @@ export class Engine {
   async refresh() {
     const player=await this.transport.rpc('get_player');
     if (!player.user_id || !Array.isArray(player.miscrits) || !Array.isArray(player.team_order)) throw new GameError('The player response is incomplete.',true);
+    const previous=this.player;
+    if(previous?.user_id===player.user_id)player._huntLimitedObjects=previous._huntLimitedObjects;
+    if(previous?.user_id===player.user_id&&JSON.stringify([previous.boss_achievements,previous.tickets])===JSON.stringify([player.boss_achievements,player.tickets]))player._huntRejectedAreas=previous._huntRejectedAreas;
     this.player=player;
     if(this.config.trainSelected&&this.config.activity!=='arena')await this.refreshIndex();
   }
@@ -112,6 +118,7 @@ export class Engine {
         await this.sequence;
         await this.refresh();
         await this.refreshIndex(true);
+        this.player._huntRejectedAreas={};
         if(epoch!==this.connectionEpoch || this.transport!==transport)return;
         if(this.player.user_id!==userId)throw new GameError('The server restored a different account. Sign out and sign in again.',true);
         if(this.draft){await transport.join(this.draft.id);this.draft.awaiting=false;transport.send(this.draft.id,9,{});}
@@ -127,12 +134,55 @@ export class Engine {
     })().finally(()=>{if(this.recoveryPromise===recovery)this.recoveryPromise=null;});
     this.recoveryPromise=recovery;return recovery;
   }
+  teamConfig(value){return this.manualTeamManagement?{...value,trainSelected:false,autoReplace:false,replacementNames:[]}:value;}
+  updateTeamSettings(value){
+    if(!this.player||!this.transport?.connected||this.requiresLogin)throw new Error('Sign in before changing team settings.');
+    if(typeof value.autoLevel!=='boolean'||!Array.isArray(value.platinumUpgradeIds))throw new Error('Invalid training settings.');
+    if(value.platinumUpgradeIds.some(id=>!this.player.miscrits.some(m=>m.id===id)))throw new Error('Platinum upgrades must refer to owned Miscrits.');
+    this.updateConfig({...this.config,autoLevel:value.autoLevel,platinumUpgradeIds:value.platinumUpgradeIds,trainSelected:false,autoReplace:false,replacementNames:[]});
+  }
+  async swapTeam(value){
+    if(!this.player||!this.transport?.connected||this.requiresLogin)throw new Error('Sign in before changing your team.');
+    if(this.running||this.busy||this.reconnecting||this.battle||this.player.battle||this.draft||this.arenaQueue?.ticket||this.arenaCancelPromise)throw new Error('Pause automation and finish the battle or arena queue before swapping.');
+    if(this.uncertain)throw new Error('Reconnect and check your team before swapping after an uncertain request.');
+    if(!Array.isArray(value.expectedTeam)||value.expectedTeam.some(id=>!Number.isSafeInteger(id)))throw new Error('Reload your team before swapping.');
+    teamSwap(this.player.team_order,this.player.miscrits,value.miscritId,value.slot);
+    this.busy=true;let acknowledged=false;
+    try{
+      const transport=this.transport,epoch=this.connectionEpoch,userId=this.player.user_id;
+      await this.refresh();
+      if(this.transport!==transport||this.connectionEpoch!==epoch||this.player?.user_id!==userId)throw new Error('The account changed. Reload before swapping.');
+      if(this.player.battle||this.battle||this.running||this.reconnecting)throw new Error('Finish the active battle before swapping.');
+      if(JSON.stringify(value.expectedTeam)!==JSON.stringify(this.player.team_order))throw new Error('Your team changed. Review the refreshed slots and try again.');
+      const after=teamSwap(this.player.team_order,this.player.miscrits,value.miscritId,value.slot);
+      if(JSON.stringify(after)===JSON.stringify(this.player.team_order))return;
+      await transport.rpc('update_team',{team:after});
+      acknowledged=true;
+      await this.refresh();
+      if(this.transport!==transport||this.connectionEpoch!==epoch||this.player?.user_id!==userId||JSON.stringify(this.player.team_order)!==JSON.stringify(after))throw new GameError('The team save could not be confirmed. Reconnect before another swap.',true);
+      this.log('Active team updated.');
+    }catch(error){if(acknowledged&&!error.uncertain)error=new GameError('The team save could not be confirmed. Reconnect before another swap.',true);this.fail(error);throw error;}finally{this.busy=false;}
+  }
+  async upgradeTrainingBonus(id){
+    if(!this.running||!this.config.autoLevel||!this.config.platinumUpgradeIds.includes(id)||!this.player.team_order.includes(id))return;
+    const raw=this.player.miscrits.find(m=>m.id===id),member=owned(raw,this.metadata),bonus=teamVitals(raw,this.metadata.get(member.mId)).bonusLevel;
+    const cost=bonus===null?null:member.level-bonus;
+    if(cost===0)return;
+    if(cost!==1)throw new Error('Platinum bonus paused: this copy needs '+(cost===null?'an unknown number of':cost)+' platinum to catch up. Only 1-platinum upgrades after a new level are enabled.');
+    if(!Number.isFinite(this.player.platinum)||this.player.platinum<1)throw new Error('Not enough platinum for the selected bonus upgrade. Automation paused.');
+    const beforeBalance=this.player.platinum;
+    await this.transport.rpc('add_bonus',{miscritId:id,currLevel:member.level});
+    try{await this.refresh();}catch{throw new GameError('The platinum bonus purchase could not be confirmed. Reconnect before continuing; the purchase was not retried.',true);}
+    const updated=this.player.miscrits.find(m=>m.id===id);
+    if(!updated||teamVitals(updated,this.metadata.get(member.mId)).bonusLevel!==member.level||this.player.platinum!==beforeBalance-1)throw new GameError('The platinum bonus purchase could not be confirmed. Reconnect before continuing; the purchase was not retried.',true);
+    this.log(member.name+' bonus upgraded for 1 platinum.');
+  }
   updateConfig(value) {
     if(this.draft||this.arenaCancelPromise||this.arenaQueue?.ticket)throw new Error('Finish the arena draft or cancel the queue before changing settings.');
     if(this.battle&&value.arenaType!==undefined&&value.arenaType!==this.config.arenaType)throw new Error('Finish the current battle before changing arena mode.');
     if (this.running || this.busy || this.reconnecting) throw new Error('Pause and wait for the current request before changing settings.');
     if (this.battle && value.activity!==this.config.activity) throw new Error('Finish the current battle before changing activity.');
-    const next=settings(value,this.catalog); this.save(next); this.config=next; this.cursor=0;
+    const next=settings(this.teamConfig(value),this.catalog); this.save(next); this.config=next; this.cursor=0;
     this.log('Settings saved.');
   }
   start() {
@@ -168,7 +218,7 @@ export class Engine {
         if (Date.now()-this.battle.updated>45000 || (this.battle.joining && Date.now()-this.battle.created>30000)) throw new GameError('Battle response timed out. Inspect the battle before reconnecting.',true);
         await this.combat(); return;
       }
-      this.nextCycle=Date.now()+3000;
+      this.nextCycle=Date.now()+(this.config.activity==='wild'?this.config.searchIntervalSeconds:3)*1000;
       await this.refresh();
       if (!this.running) return;
       if (this.player.battle) { await this.join(this.player.battle); this.stop('An existing battle was found. Continue it manually.'); return; }
@@ -208,6 +258,7 @@ export class Engine {
           this.record('training',`${before.name}: level ${before.level} → ${before.level+1} with earned XP`,before);
           this.log(`${before.name} reached level ${before.level+1} with earned XP.`);
           this.stats.levels++;if(before.level+1===(selectedPlan&&team.indexOf(before.id)>0?30:35))this.notify('training',`${before.name} finished training at level ${before.level+1}.`);
+          await this.upgradeTrainingBonus(before.id);
           return; // One level per cycle; recheck pause, team and XP before any next action.
         }
       }
@@ -255,7 +306,7 @@ export class Engine {
         if (fainted===this.player.team_order.length) throw new Error('Heal your team before searching.');
         const routeNames=huntNames(this.config,selectedPlan);
         const route=routePlan({...this.config,names:routeNames},this.player,this.catalog);
-        if (!route.stops.length) throw new Error('No available search locations for the selected targets today. Check map unlocks and tickets.');
+        if (!route.stops.length) throw new Error('No available search locations for the selected targets. '+[...new Set(Object.values(route.availability).map(access=>access.detail||access.reason))].join(' '));
         const now=Date.now();
         const {stop,nextCursor}=nextSearchStop({config:this.config,stops:route.stops,cursor:this.cursor,catalog:this.catalog,cooldowns:this.cooldowns,now});
         this.cursor=nextCursor;
@@ -264,18 +315,29 @@ export class Engine {
         const area=this.player.area;
         if (!atSearchLocation(area,stop,this.protocol)) {
           try {await this.transport.rpc('update_location',{locationId:this.protocol.locations[stop.location],areaId:stop.area_id});}
-          catch(error){error.message+=` Moving to ${searchLabel}.`;error.searchLocation={map:stop.location,area:stop.area_id,object:stop.object_id};throw error;}
+          catch(error){
+            if(error.rejected&&!error.uncertain){
+              this.player._huntRejectedAreas||={};
+              this.player._huntRejectedAreas[stop.location+':'+stop.area_id]=`The server rejected travel to ${stop.location.replaceAll('_',' ')} area ${stop.area_id}. This area is excluded for this session. Check its boss gates, then reload account data or sign in again to recheck access.`;
+            }
+            error.message+=` Moving to ${searchLabel}.`;error.searchLocation={map:stop.location,area:stop.area_id,object:stop.object_id};throw error;
+          }
           this.player.area={area_id:stop.area_id,location:{id:this.protocol.locations[stop.location],name:stop.location}};
           if (!this.running) return;
         }
         // Reserve before sending. Rejected/uncertain mutations are never retried in a loop.
         this.cooldowns.set(stop.key,now+(this.player.left_traits?.includes(100)?21000:31000));
         this.currentSearch=structuredClone(stop);this.stats.searches++;
+        this.nextCycle=Math.max(this.nextCycle,Date.now()+this.config.searchIntervalSeconds*1000);
         let result;
         try {
           result=await this.transport.rpc('create_battle',{type:'Wild',payload:{objectId:stop.object_id}});
         } catch(error) {
           const outcome=error.rejected && error.rpcId==='create_battle' ? error.searchOutcome : null;
+          if(outcome?.limit){
+            this.player._huntLimitedObjects||={};
+            this.player._huntLimitedObjects[stop.key]='The game server reported a daily search limit at '+searchLabel+'. This object is excluded for this session. No reset time or limit count was supplied. The scope may include other targets. Wait until the game allows searching; changing targets is not a confirmed fix.';
+          }
           // Native WorldManager.setup_battle uses success:false for these ordinary outcomes.
           // Only a definitive response permits continuing; unknown/time-out results still stop.
           if (outcome && !outcome.disabled && !outcome.limit && (outcome.cooldown || outcome.drop)) {
@@ -288,7 +350,12 @@ export class Engine {
           throw error;
         }
         this.log(`Searched ${stop.location.replaceAll('_',' ')} · area ${stop.area_id} · object ${stop.object_id}.`);
-        if (result.disabled || result.limit) throw new Error('The game disabled this search object or reached its limit.');
+        if(result.limit){
+          this.player._huntLimitedObjects||={};
+          this.player._huntLimitedObjects[stop.key]='The game server reported a daily search limit at '+searchLabel+'. This object is excluded for this session.';
+          throw new Error('The game server reported a daily search limit. [create_battle] Search: '+searchLabel+'.');
+        }
+        if(result.disabled)throw new Error('The game disabled this search object.');
         if (result.matchId) await this.join(result.matchId);
       }
     } catch(error) { this.fail(error); }
@@ -649,13 +716,13 @@ export class Engine {
   }
   snapshot() {
     const p=this.player;
-    const roster=p ? p.miscrits.map(m=>({...owned(m,this.metadata),...trainingStatus(m,this.protocol)})) : [];
+    const roster=p ? p.miscrits.map(m=>({...owned(m,this.metadata),...trainingStatus(m,this.protocol),...teamVitals(m,this.metadata.get(Number(m.v===2?m.m:m.mId)))})) : [];
     let selectedTraining=null;
     if(p && this.config.trainSelected){try{selectedTraining=selectedTrainingPlan(p,this.config.replacementNames,this.catalog,this.metadata,this.collectionIndex);}catch(error){selectedTraining={error:error.message};}}
     let queue;try{queue=targetQueue({config:this.config,player:p,catalog:this.catalog,metadata:this.metadata,index:this.collectionIndex,cooldowns:this.cooldowns,cursor:this.cursor,currentSearch:this.currentSearch,battle:this.battle});}catch(error){queue={targets:[],current:null,next:null,message:error.message};}
     return {connected:Boolean(p && this.transport?.connected && !this.requiresLogin),reconnecting:this.reconnecting,requiresLogin:this.requiresLogin,connection:this.transport?.diagnostics?.()||{},busy:this.busy,running:this.running,uncertain:this.uncertain,status:this.status,selectedTraining,
       queue,lastStop:this.lastStop,sessionStats:this.stats.snapshot(),wildHealingSpent:this.wildHealingSpent,alerts:this.alerts,profiles:this.profiles.map(p=>({name:p.name})),
-      config:this.config,wins:this.wins,events:this.events,history:this.history,collectionIndex:this.collectionIndex,
+      config:this.config,wins:this.wins,events:this.events,history:this.history,collectionIndex:this.collectionIndex,huntAccessVersion:2,teamManagementVersion:1,huntAvailability:huntAvailability(p,this.catalog),
       arena:{records:this.arenaRecords,queue:this.arenaQueue?{type:this.arenaQueue.type,status:this.arenaQueue.status,searching:!this.arenaQueue.cancelled&&!this.arenaQueue.matched,elapsedSeconds:Math.floor((Date.now()-this.arenaQueue.started)/1000)}:null,run:this.arenaRun},draft:this.draft?structuredClone(this.draft):null,
       player:p?{username:p.username,name:p.display_name||p.username,level:p.level,virtue:p.virtue,gold:p.gold,platinum:p.platinum,area:p.area,team:p.team_order.map(id=>roster.find(m=>m.id===id)).filter(Boolean),roster}:null,
       battle:this.battle ? structuredClone(this.battle) : null};

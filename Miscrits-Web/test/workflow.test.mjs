@@ -80,7 +80,7 @@ test('stop advice distinguishes manual pause, known recovery steps and unresolve
 });
 
 test('target controls reorder unsaved choices, toggle the primary and preserve the training list',()=>{
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');
   const helpers=source.slice(source.indexOf('function removeName('),source.indexOf('function renderLists('));let renders=0;
   const ctx=vm.createContext({draft:{names:['Flue','Moon target'],primaryTarget:'',replacementNames:['Flue']},dirty:false,renderLists:()=>renders++,document:{querySelector:()=>null}});
   vm.runInContext(helpers,ctx);ctx.togglePrimary('Flue');ctx.moveTarget('Flue',1);
@@ -91,7 +91,7 @@ test('target controls reorder unsaved choices, toggle the primary and preserve t
 
 test('stop report renders exact reasons safely as text with separate guidance and resumed status',()=>{
   const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,{textContent:'',classList:{toggle(){}}});return elements.get(id);};
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8'),helper=source.slice(source.indexOf('function renderStopReport('),source.indexOf('function renderWorkflow('));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8'),helper=source.slice(source.indexOf('function renderStopReport('),source.indexOf('function renderWorkflow('));
   const ctx=vm.createContext({$,state:{lastStop:null}});vm.runInContext(helper,ctx);ctx.renderStopReport();assert.equal($('stop-report-details').hidden,true);
   ctx.state.lastStop={time:new Date().toISOString(),message:'<img src=x> rejected',category:'Game request failed',action:'Check Live battle',rpcId:'create_battle',activity:'wild',location:{map:'forest',area:1,object:0},resumedAt:'now'};
   ctx.renderStopReport();assert.equal($('stop-report-reason').textContent,'<img src=x> rejected');assert.equal($('stop-report-state').textContent,'Resumed since this stop');assert.match($('stop-report-context').textContent,/object 0.*create_battle/);assert.equal($('stop-report-action').textContent,'Check Live battle');
@@ -166,7 +166,7 @@ test('notifications are bounded and disabled preferences suppress further backen
   const stats=new SessionStats();assert.equal(stats.snapshot().captures,0);assert.ok(stats.snapshot().elapsedSeconds>=0);
 });
 test('frontend notification polling does not replay historic alerts and emits each new ID once',()=>{
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');const helper=source.slice(source.indexOf('function freshAlerts('),source.indexOf('function consumeAlerts('));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');const helper=source.slice(source.indexOf('function freshAlerts('),source.indexOf('function consumeAlerts('));
   const ctx=vm.createContext({});vm.runInContext(helper,ctx);const next={config:{notifyEvents:true},alerts:[{id:2},{id:1}]};
   assert.equal(ctx.freshAlerts(null,next).length,0);assert.deepEqual([...ctx.freshAlerts({alerts:[{id:1}]},next)].map(a=>a.id),[2]);
   assert.equal(ctx.freshAlerts(next,next).length,0);next.config.notifyEvents=false;assert.equal(ctx.freshAlerts({alerts:[]},next).length,0);
@@ -182,7 +182,7 @@ test('workflow HTTP actions keep the same owner cookie, CSRF and origin checks',
   }finally{await app.close();}
 });
 test('notification polling sends only newly arrived alerts after explicit browser enablement and never requests permission itself',()=>{
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');const helpers=source.slice(source.indexOf('function freshAlerts('),source.indexOf("$('profile-list').addEventListener"));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');const helpers=source.slice(source.indexOf('function freshAlerts('),source.indexOf("$('profile-list').addEventListener"));
   const popped=[],toasts=[];class Notification{static permission='granted';constructor(title,options){popped.push(options.body);}}
   const context=vm.createContext({browserAlertsEnabled:false,Notification,toast:message=>toasts.push(message)});vm.runInContext(helpers,context);
   const previous={alerts:[{id:1}]},next={config:{notifyEvents:true},alerts:[{id:2,message:'Capture kept'}]};
@@ -209,7 +209,7 @@ test('a stale profile collection on disk skips invalid credentials and settings 
 test('workflow renders the backend queue, profiles, budget, counters and recent alerts together',()=>{
   class Element{constructor(tag='div',css='',text=''){Object.assign(this,{tag,className:css,textContent:text,children:[],value:'Example'});}append(...children){this.children.push(...children);}replaceChildren(...children){this.children=children;}setAttribute(){}addEventListener(){}}
   const elements=new Map(),$=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8'),helpers=source.slice(source.indexOf('function workflowDuration('),source.indexOf('function freshAlerts('));
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8'),helpers=source.slice(source.indexOf('function workflowDuration('),source.indexOf('function freshAlerts('));
   const ctx=vm.createContext({$,posting:false,browserAlertsEnabled:false,element:(...args)=>new Element(...args),state:{running:false,busy:false,battle:null,reconnecting:false,queue:{message:'Waiting',current:{label:'Flue'},next:{location:'forest',area:1,object:0,targets:['Flue']},targets:[{name:'Flue',reason:'Cooling down',status:'cooldown',waitSeconds:5}]},config:{wildHealBudget:30},wildHealingSpent:10,sessionStats:{searches:2,captures:1,elapsedSeconds:65},profiles:[{name:'Example'}],alerts:[{id:1,time:new Date().toISOString(),message:'Captured'}]}});
   vm.runInContext(helpers+';renderWorkflow();',ctx);
   assert.match($('queue-next').textContent,/forest.*object 0.*Flue/);assert.equal($('queue-list').children.length,1);

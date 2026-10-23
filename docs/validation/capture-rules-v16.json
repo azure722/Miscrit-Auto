@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-23",
+  "native_evidence": [
+    "readable/models/PlayerMiscrit.gd get_rating: Constants.ratings[18-sum]",
+    "mapping-source/singletons/constants.gd ratings",
+    "readable/singletons/world_manager.gd setup_battle: server limit flag displays daily-limit message"
+  ],
+  "browser_validation": [
+    "F selects numeric 7",
+    "S+ selects numeric 18",
+    "A+ summary at capture chance 65%",
+    "Any-capture mode disables ignored grades",
+    "Manual mode disables capture threshold",
+    "Minimum-grade override explained",
+    "Configurable search pacing field",
+    "390px mobile layout has no horizontal overflow"
+  ],
+  "limits": "Server-wide quota and anti-spam rules were not observed or probed. No real account login/search was performed. Preview used an isolated backend fixture."
+}

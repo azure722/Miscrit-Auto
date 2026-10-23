@@ -58,7 +58,7 @@ test('an exhausted hunt list stops cleanly when no training upgrades remain',asy
   assert.equal(engine.running,false);assert.match(engine.status,/All hunt targets collected/);assert.equal(calls.includes('create_battle'),false);
 });
 test('server target removals update visible drafts without discarding unrelated unsaved changes',()=>{
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');
   const code=source.slice(source.indexOf('function reconcileHuntTargets('),source.indexOf('async function poll(){'));
   const draft={names:['Captured','Other','Unsaved new target'],minRating:18};
   const context=vm.createContext({draft,dirty:true});vm.runInContext(code,context);

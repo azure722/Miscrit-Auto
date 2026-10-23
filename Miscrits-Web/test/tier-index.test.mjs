@@ -42,9 +42,10 @@ test('index is cached briefly and cleared at logout so accounts cannot share com
   engine.indexUpdated=0;await engine.refreshIndex();assert.equal(calls,2);await engine.logout();assert.equal(engine.collectionIndex,null);
 });
 test('tier batch actions use current index and inventory, deduplicate species and skip completed families',()=>{
-  const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+  const source=readFileSync(new URL('../src/controller.js',import.meta.url),'utf8');
   const helpers=source.slice(source.indexOf('function familyStatus('),source.indexOf('function renderTierLists('));
   const state={connected:true,player:{team:[{id:90}],roster:[{id:1,mId:1,level:1,rating:18},{id:4,mId:4,level:1,rating:18},{id:5,mId:5,level:1,rating:10}]},collectionIndex:miscritsIndex({'1':2000})};
+  state.huntAccessVersion=2;state.huntAvailability=Object.fromEntries(catalog.species.map(s=>[s.name,{available:true,reason:'Available'}]));
   const draft={replacementNames:['Exotic B']};let renders=0;
   vm.runInNewContext(helpers+";addTier('Exotic','owned');addTier('Exotic','capture');",{state,draft,catalog:catalog.species,toast(){},renderLists(){renders++;}});
   assert.deepEqual([...draft.replacementNames],['Exotic B','Exotic C']);assert.equal(renders,2);

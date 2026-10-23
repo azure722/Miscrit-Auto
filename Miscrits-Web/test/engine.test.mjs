@@ -49,6 +49,13 @@ test('normal item drops and cooldown responses after victory keep hunting withou
   }
 });
 
+test('search pacing stops a second search and account refresh until the configured interval expires',async()=>{
+  const {engine,responses,calls}=harness({names:['Flue'],searchIntervalSeconds:10});
+  responses.create_battle=()=>unwrap({success:false,data:{drop:{gold:1}}},'create_battle');engine.running=true;
+  await engine.tick();assert.ok(engine.nextCycle>=Date.now()+9500);
+  const requests=calls.length;await engine.tick();assert.equal(calls.length,requests);
+});
+
 test('disabled objects, exhausted limits and unknown rejections pause with request and location details',async()=>{
   for(const data of [{disabled:true,drop:{gold:5}},{limit:true},{message:'Area is locked'},{}]){
     const {engine,responses,calls}=harness({names:['Flue']});
@@ -67,6 +74,41 @@ test('rejected travel identifies the location and never searches an unconfirmed 
   responses.update_location=()=>unwrap({success:false,data:{message:'Area locked'}},'update_location');engine.running=true;
   await engine.tick();assert.equal(engine.running,false);assert.match(engine.status,/\[update_location\].*Moving to forest/);
   assert.equal(calls.some(c=>c[0]==='create_battle'),false);assert.equal(engine.player.area.area_id,2);
+  assert.equal(engine.snapshot().huntAvailability.Flue.reason,'Travel rejected');
+  engine.nextCycle=0;engine.start();await engine.tick();
+  assert.equal(calls.filter(c=>c[0]==='update_location').length,1,'a rejected area must not be submitted again after Start');
+  assert.equal(engine.snapshot().huntAvailability.Flue.available,false);
+});
+
+test('a server daily limit excludes that object across polls and manual restart while other objects remain usable',async()=>{
+  const {engine,p,responses,calls}=harness({names:['Flue']});
+  engine.catalog={...catalog,species:[...catalog.species,{id:2,name:'Other',stops:[{location:'forest',area_id:1,object_id:1,days:[]}]}]};
+  engine.config.names.push('Other');
+  responses.create_battle=payload=>unwrap({success:false,data:payload.payload.objectId===0?{limit:true}:{drop:{gold:1}}},'create_battle');
+  engine.running=true;await engine.tick();
+  assert.equal(engine.running,false,'a limit pauses for review; its server-wide scope is unknown');
+  assert.equal(engine.lastStop.category,'Server search limit');
+  assert.match(engine.lastStop.action,/Other targets may also be limited/);
+  assert.equal(engine.snapshot().huntAvailability.Flue.reason,'Daily limit reached');
+  assert.equal(engine.snapshot().huntAvailability.Other.available,true);
+  assert.match(engine.snapshot().queue.targets.find(t=>t.name==='Flue').reason,/server reported a daily search limit/);
+  engine.nextCycle=0;engine.start();await engine.tick();
+  assert.deepEqual(calls.filter(c=>c[0]==='create_battle').map(c=>c[1].payload.objectId),[0,1]);
+  assert.equal(engine.running,true);assert.equal(engine.player._huntLimitedObjects['forest:1:0']!==undefined,true);
+});
+
+test('saved Jungle targets cannot send travel or search requests through the area-4 boss gate',async()=>{
+  const {engine,p,calls}=harness();
+  engine.catalog={teleports:{miscrian_jungle:{requirement:'wind_elementum'}},species:[{id:1,name:'Bunaken',stops:[{location:'miscrian_jungle',area_id:4,object_id:0}]}]};
+  engine.config.names=['Bunaken'];p.boss_achievements={wind_elementum:true,magicite_warden:true,magicite_herald:true};engine.running=true;
+  await engine.tick();
+  assert.equal(engine.running,false);assert.match(engine.status,/Magicite Goremand.*area 4/);
+  assert.equal(calls.some(c=>c[0]==='update_location'||c[0]==='create_battle'),false);
+  const snapshot=engine.snapshot();
+  assert.equal(snapshot.huntAvailability.Bunaken.reason,'Area locked');
+  assert.match(snapshot.queue.targets[0].reason,/Magicite Goremand/);
+  p.boss_achievements.magicite_goremand=true;await engine.refresh();
+  assert.equal(engine.snapshot().huntAvailability.Bunaken.available,true);
 });
 
 test('RPC rejection details are limited to messages and known flags, with sensitive strings redacted',async()=>{

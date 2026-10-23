@@ -1,4 +1,4 @@
-export const DEFAULTS = Object.freeze({activity:'wild', mode:'manual_target', names:[],primaryTarget:'', minRating:17, captureThreshold:70, captureLowRatedTargets:false, autoRemoveCapturedTargets:true, fleeUnwanted:true, maxAttacks:12, campaignLimit:10, autoLevel:false, trainSelected:false, autoReplace:false, replacementNames:[],wildAutoHeal:false,wildHealBudget:30,notifyEvents:true,arenaType:'Default',arenaStrategy:'smart',arenaBattleLimit:10,arenaStopOnLoss:true,arenaAllowInjured:false});
+export const DEFAULTS = Object.freeze({activity:'wild', mode:'manual_target', names:[],primaryTarget:'', minRating:17, searchIntervalSeconds:8, captureThreshold:70, captureLowRatedTargets:false, autoRemoveCapturedTargets:true, fleeUnwanted:true, maxAttacks:12, campaignLimit:10, autoLevel:false, platinumUpgradeIds:[], trainSelected:false, autoReplace:false, replacementNames:[],wildAutoHeal:false,wildHealBudget:30,notifyEvents:true,arenaType:'Default',arenaStrategy:'smart',arenaBattleLimit:10,arenaStopOnLoss:true,arenaAllowInjured:false});
 export const TRAINING_TIERS=Object.freeze(['Exotic','Rare','Common','Epic','Legendary']);
 export const TRAINING_MIN_RATING=17;
 export function settings(input, catalog) {
@@ -18,7 +18,7 @@ export function settings(input, catalog) {
       return entry.name;
     }))];
   }
-  for (const [key, max, min] of [['minRating',18,0],['captureThreshold',100,1],['maxAttacks',50,1],['campaignLimit',10,1],['wildHealBudget',1000,0],['arenaBattleLimit',1000,1]]) {
+  for (const [key, max, min] of [['minRating',18,0],['searchIntervalSeconds',120,3],['captureThreshold',100,1],['maxAttacks',50,1],['campaignLimit',10,1],['wildHealBudget',1000,0],['arenaBattleLimit',1000,1]]) {
     if (input[key] === undefined) continue;
     if (!Number.isInteger(input[key]) || input[key] < min || input[key] > max) throw new Error('Invalid value for ' + key);
     result[key] = input[key];
@@ -31,6 +31,10 @@ export function settings(input, catalog) {
   for (const key of ['autoLevel','trainSelected','autoReplace','fleeUnwanted','captureLowRatedTargets','autoRemoveCapturedTargets','wildAutoHeal','notifyEvents','arenaStopOnLoss','arenaAllowInjured']) {
     if (input[key] !== undefined && typeof input[key] !== 'boolean') throw new Error('Invalid ' + key);
     if (input[key] !== undefined) result[key] = input[key];
+  }
+  if(input.platinumUpgradeIds!==undefined){
+    if(!Array.isArray(input.platinumUpgradeIds)||input.platinumUpgradeIds.length>1000||input.platinumUpgradeIds.some(id=>!Number.isSafeInteger(id)||id<=0))throw new Error('Invalid platinum upgrade selection.');
+    result.platinumUpgradeIds=[...new Set(input.platinumUpgradeIds)];
   }
   return result;
 }
@@ -108,30 +112,62 @@ export function rotationPlan(player, names, catalog, metadata) {
   for (let slot=1; slot<team.length; slot++) if (roster.get(team[slot]).level >= 35 && pool.length) after[slot]=pool.shift().id;
   return {before:[...team],after,changed:after.some((id,i)=>id!==team[i])};
 }
-export function routePlan(config, player, catalog, day = new Date().getUTCDay()) {
-  const labels={forest:'Forest',hidden_forest:'Hidden Forest',mount_gemma:'Mount Gemma',mansion:'Mansion',sunfall_shores:'Sunfall Shores',cave:'Cave',moon:'Moon',shack:'Shack',miscrian_jungle:'Miscrian Jungle',monks_mountain:'Monks Mountain',emerald_isle:'Emerald Isle',temple:'Temple'};
-  const stops = new Map(), unavailable = [];
-  for (const name of config.names) {
-    const species = catalog.species.find(s => s.name === name);
-    let available = 0;
-    const options=species?.stops?.length ? species.stops : (catalog.area_objects||[]).filter(stop=>species?.locations?.[labels[stop.location]]?.[String(stop.area_id)]);
-    for (const stop of options) {
-      const days=species.locations?.[labels[stop.location]]?.[String(stop.area_id)] || stop.days;
-      if (days?.length && !days.includes(day)) continue;
-      const gate = catalog.teleports[stop.location];
-      if (gate?.requirement && !player.boss_achievements?.[gate.requirement]) continue;
-      if (gate?.ticket && !player.tickets?.[gate.ticket]) continue;
-      const achievements=player.boss_achievements||{};
-      if (stop.location==='moon' && stop.area_id===2 && !achievements.singularitas) continue;
-      if (stop.location==='shack' && stop.area_id>=3 && !achievements.ylil_nosaj) continue;
-      if (stop.location==='temple' && stop.area_id>=4 && !achievements.the_temple_trial) continue;
-      const key = `${stop.location}:${stop.area_id}:${stop.object_id}`;
-      if (!stops.has(key)) stops.set(key,{...stop,key,targets:[]});
-      stops.get(key).targets.push(species.id); available++;
+// Each outdoor region has separate boss gates between its four search areas.
+// Map entry requirements alone do not grant access to the later areas.
+export const AREA_REQUIREMENTS={
+  forest:{2:'magicite_novice',3:'magicite_neophyte',4:'magicite_adept'},
+  mount_gemma:{2:'magicite_apprentice',3:'magicite_general',4:'magicite_commander'},
+  sunfall_shores:{2:'magicite_overseer',3:'magicite_mastermind',4:'magicite_overlord'},
+  miscrian_jungle:{2:'magicite_warden',3:'magicite_herald',4:'magicite_goremand'},
+  monks_mountain:{2:'magicite_monk',3:'magicite_armsmaster',4:'magicite_abbot'},
+  moon:{2:'singularitas'},shack:{3:'ylil_nosaj',4:'ylil_nosaj'},temple:{4:'the_temple_trial'}
+};
+const mapLabels={forest:'Forest',hidden_forest:'Hidden Forest',mount_gemma:'Mount Gemma',mansion:'Mansion',sunfall_shores:'Sunfall Shores',cave:'Cave',moon:'Moon',shack:'Shack',miscrian_jungle:'Miscrian Jungle',monks_mountain:'Monks Mountain',emerald_isle:'Emerald Isle',temple:'Temple'};
+const readableKey=key=>key.replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase());
+function mapAccessStatus(player,stop,catalog) {
+  const gate=catalog.teleports?.[stop.location],achievements=player.boss_achievements||{},area=Number(stop.area_id);
+  const blocked=player._huntRejectedAreas?.[stop.location+':'+area];
+  if(blocked)return {available:false,reason:'Travel rejected',detail:blocked};
+  if(gate?.requirement&&!achievements[gate.requirement])return {available:false,reason:'Map locked',requirement:gate.requirement,detail:'Defeat '+readableKey(gate.requirement)+' to enter '+(mapLabels[stop.location]||stop.location)+'.'};
+  if(gate?.ticket&&!player.tickets?.[gate.ticket])return {available:false,reason:'Ticket required',detail:'A '+readableKey(gate.ticket)+' ticket is required.'};
+  const requirement=AREA_REQUIREMENTS[stop.location]?.[area]||
+    (stop.location==='shack'&&area>=3?'ylil_nosaj':stop.location==='temple'&&area>=4?'the_temple_trial':'');
+  if(requirement&&!achievements[requirement])return {available:false,reason:'Area locked',requirement,detail:'Defeat '+readableKey(requirement)+' to unlock '+(mapLabels[stop.location]||stop.location)+' area '+area+'.'};
+  return null;
+}
+function speciesStops(species,catalog){
+  return species?.stops?.length?species.stops:(catalog.area_objects||[]).filter(stop=>species?.locations?.[mapLabels[stop.location]]?.[String(stop.area_id)]);
+}
+export function huntAvailability(player,catalog,day=new Date().getUTCDay()) {
+  if(!player)return Object.fromEntries(catalog.species.map(s=>[s.name,{available:false,reason:'Sign in to check maps'}]));
+  return routePlan({names:catalog.species.map(s=>s.name)},player,catalog,day).availability;
+}
+export function routePlan(config,player,catalog,day=new Date().getUTCDay()) {
+  const stops=new Map(),unavailable=[],availability={};
+  for(const name of config.names){
+    const species=catalog.species.find(s=>s.name===name),options=speciesStops(species,catalog),reasons=[],locations=new Set();
+    for(const stop of options){
+      const limited=player._huntLimitedObjects?.[`${stop.location}:${stop.area_id}:${stop.object_id}`];
+      if(limited){reasons.push({available:false,reason:'Daily limit reached',detail:limited});continue;}
+      const official=species.locations,areas=official?.[mapLabels[stop.location]],area=String(stop.area_id);
+      // A live feed can remove a previously mapped spawn. Never keep routing to it.
+      if(official&&(!areas||!Object.hasOwn(areas,area))){reasons.push({available:false,reason:'Spawn mapping changed',detail:'This mapped area is absent from the current official spawn data.'});continue;}
+      const blocked=mapAccessStatus(player,stop,catalog);
+      if(blocked){reasons.push(blocked);continue;}
+      const days=areas?.[area]||stop.days;
+      if(days?.length&&!days.includes(day)){reasons.push({available:false,reason:'Not today',detail:'This species is not available here today (UTC schedule).'});continue;}
+      const key=`${stop.location}:${stop.area_id}:${stop.object_id}`;
+      if(!stops.has(key))stops.set(key,{...stop,key,targets:[]});
+      stops.get(key).targets.push(species.id);locations.add(stop.location);
     }
-    if (!available) unavailable.push(name);
+    if(locations.size)availability[name]={available:true,reason:'Available',locations:[...locations]};
+    else{
+      unavailable.push(name);
+      // Prefer a real usable map on another day over a locked alternate location.
+      availability[name]=reasons.find(r=>r.reason==='Not today')||reasons[0]||{available:false,reason:'No wild location',detail:'No mapped wild search object is available for this family.'};
+    }
   }
-  return {stops:[...stops.values()],unavailable};
+  return {stops:[...stops.values()],unavailable,availability};
 }
 export function atSearchLocation(area,stop,protocol) {
   const expected=protocol.locations[stop.location];
